@@ -1,3 +1,4 @@
+// vim: set expandtab ts=4 sw=4 :
 /*
  * Copyright 2008, 2009 Andrey Zholos. All rights reserved.
  *
