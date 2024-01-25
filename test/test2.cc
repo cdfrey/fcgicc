@@ -65,7 +65,7 @@ handler on ports 7000 through 7009 and validates the responses.
 #include <fastcgi.h>
 
 
-static const int base_port = 7000;
+static const unsigned base_port = 7000;
 static const int processes = 25;
 static const int requests = 1000;
 
@@ -74,10 +74,10 @@ static const std::string param_rot13("ROT13");
 
 struct Rot13 : public std::unary_function<char, char> {
     char operator() (char c) const {
-        if (c >= 'a' && c <= 'm' || c >= 'A' && c <= 'M')
-            return c + 13;
-        if (c >= 'n' && c <= 'z' || c >= 'N' && c <= 'Z')
-            return c - 13;
+        if( (c >= 'a' && c <= 'm') || (c >= 'A' && c <= 'M') )
+            return char(c + 13);
+        if( (c >= 'n' && c <= 'z') || (c >= 'N' && c <= 'Z') )
+            return char(c - 13);
         return c;
     }
 };
@@ -85,7 +85,7 @@ struct Rot13 : public std::unary_function<char, char> {
 
 struct RandomChar {
     char operator()() const {
-        return rand() % 256;
+        return char(rand() % 256);
     }
 };
 
@@ -115,8 +115,7 @@ struct Handler {
 
 int handle_data(FastCGIRequest& request)
 {
-    std::transform(request.in.begin(), request.in.end(),
-        std::back_inserter(request.out), Rot13());
+    std::transform(request.in.begin(), request.in.end(), std::back_inserter(request.out), Rot13());
     request.in.clear();
     return 0;
 }
@@ -129,7 +128,7 @@ void server()
     FastCGIServer server;
     server.request_handler(handler, &Handler::handle_request);
     server.data_handler(&handle_data);
-    for (int i = 0; i < 10; i++)
+    for (unsigned i = 0; i < 10; i++)
         server.listen(base_port + i);
     server.process_forever();
 }
@@ -139,45 +138,45 @@ struct Querier {
     int socket;
 
     void write(const char* data, size_t length) {
-        for (;;) {
-            int result = ::write(socket, data, length);
-            if (result == length)
-                return;
+        for (; length > 0;) {
+            ssize_t result = ::write(socket, data, length);
             if (result <= 0)
                 throw std::runtime_error("write() failed in data client");
+            if (size_t(result) == length)
+                return;
             data += result;
-            length -= result;
+            length -= size_t(result);
         }
     }
 
     bool read(std::string& output) {
         char buf[4096];
-        int result = ::read(socket, buf, sizeof(buf));
+        ssize_t result = ::read(socket, buf, sizeof(buf));
         if (result == -1)
             throw std::runtime_error("read() failed in data client");
         if (result == 0)
             return false;
-        output.append(buf, result);
+        output.append(buf, size_t(result));
         return true;
     }
 
     void write_stream(int type, const std::string& stream, size_t& i) {
         size_t n = std::min(stream.size() - i, (std::string::size_type)65535);
-        if (n >= 256 || n > 1 && rand() % 3 != 0)
-            n = rand() % (n - 1) + 1;
+        if (n >= 256 || (n > 1 && rand() % 3 != 0))
+            n = size_t(rand()) % (n - 1) + 1;
 
         size_t m = i == stream.size() || rand() % 3 != 0 ? 0 :
-            rand() % std::min(stream.size() - i, (std::string::size_type)63);
+            size_t(rand()) % std::min(stream.size() - i, (std::string::size_type)63);
         std::unique_ptr<char[]> padding( new char[m] );
         bzero(padding.get(), m);
 
         FCGI_Header header;
         bzero(&header, sizeof(header));
         header.version = FCGI_VERSION_1;
-        header.type = type;
-        header.contentLengthB1 = n / 256;
-        header.contentLengthB0 = n % 256;
-        header.paddingLength = m;
+        header.type = (unsigned char)type;
+        header.contentLengthB1 = (unsigned char)(n / 256);
+        header.contentLengthB0 = (unsigned char)(n % 256);
+        header.paddingLength = (unsigned char)m;
 
         write(reinterpret_cast<const char*>(&header), sizeof(header));
         write(stream.data() + i, n);
@@ -203,7 +202,7 @@ struct Querier {
         if (i > 10)
             i = 0;
         for (; i >= 0; i--) {
-            size_t m = rand() % 300, n = rand() % 700;
+            size_t m = size_t(rand()) % 300, n = size_t(rand()) % 700;
             encode_size(params, m + 1);
             encode_size(params, n);
             params.push_back('_');
@@ -239,7 +238,7 @@ struct Querier {
             struct sockaddr_in sa;
             bzero(&sa, sizeof(sa));
             sa.sin_family = AF_INET;
-            sa.sin_port = htons(base_port + rand() % 10);
+            sa.sin_port = htons(uint16_t(base_port + unsigned(rand()) % 10));
             sa.sin_addr.s_addr = htonl(0x7f000001);
             if (::connect(socket, (struct sockaddr*)&sa, sizeof(sa)) == -1)
                 throw std::runtime_error("connect() failed in data client");
@@ -257,8 +256,7 @@ struct Querier {
             // Send streams in random chunks
             size_t in_i = 0, params_i = 0;
             while (in_i < in.size() || params_i < params.size()) {
-                if (in_i == in.size() ||
-                        params_i < params.size() && rand() % 3 == 0)
+                if (in_i == in.size() || (params_i < params.size() && rand() % 3 == 0))
                     write_stream(FCGI_PARAMS, params, params_i);
                 else
                     write_stream(FCGI_STDIN, in, in_i);
@@ -274,8 +272,7 @@ struct Querier {
             // Sometimes close our end of the socket
             if (rand() % 5 == 0)
                 if (::shutdown(socket, SHUT_WR) == -1)
-                    throw std::runtime_error("shutdown() failed "
-                        "in data client");
+                    throw std::runtime_error("shutdown() failed in data client");
 
             // Receive and verify results
             std::string output;
@@ -291,8 +288,7 @@ struct Querier {
                 if (header.version != FCGI_VERSION_1)
                     throw std::runtime_error("received: incorrect version");
 
-                size_t content = (header.contentLengthB1 << 8) +
-                    header.contentLengthB0;
+                size_t content = (unsigned(header.contentLengthB1) << 8) + header.contentLengthB0;
                 size_t padding = header.paddingLength;
                 if (output.size() - sizeof(FCGI_Header) < content + padding)
                     continue;
@@ -300,24 +296,21 @@ struct Querier {
                 switch (header.type) {
                 case FCGI_STDOUT:
                     if (closed_out)
-                        throw std::runtime_error("received: "
-                            "data on closed stream");
+                        throw std::runtime_error("received: data on closed stream");
                     out.append(output.data() + sizeof(FCGI_Header), content);
                     if (content == 0)
                         closed_out = true;
                     break;
                 case FCGI_STDERR:
                     if (closed_err)
-                        throw std::runtime_error("received: "
-                            "data on closed stream");
+                        throw std::runtime_error("received: data on closed stream");
                     err.append(output.data() + sizeof(FCGI_Header), content);
                     if (content == 0)
                         closed_err = true;
                     break;
                 case FCGI_END_REQUEST: {
                     if (!closed_out || !closed_err)
-                        throw std::runtime_error("received: "
-                            "streams not closed");
+                        throw std::runtime_error("received: streams not closed");
                     if (output.size() - sizeof(FCGI_Header) <
                             sizeof(FCGI_EndRequestBody))
                         continue;
@@ -361,7 +354,7 @@ struct Querier {
 
 void client()
 {
-    for (int i = 0; i < processes; i++) {
+    for (unsigned i = 0; i < processes; i++) {
         switch (::fork()) {
         case -1:
             throw std::runtime_error("fork() failed");
