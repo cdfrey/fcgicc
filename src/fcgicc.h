@@ -79,7 +79,7 @@ public:
         set_handler(handle_complete, new Handler<C>(object, function));
     }
 
-    void listen(unsigned tcp_port);
+    void listen(uint16_t tcp_port);
     void listen(const std::string& local_path);
     void abandon_files();
 

@@ -130,7 +130,7 @@ FastCGIServer::set_handler(std::unique_ptr<HandlerBase> &handler, HandlerBase* n
 
 
 void
-FastCGIServer::listen(unsigned tcp_port)
+FastCGIServer::listen(uint16_t tcp_port)
 {
     int listen_socket = socket(PF_INET, SOCK_STREAM, 0);
     if (listen_socket == -1)
@@ -179,8 +179,8 @@ FastCGIServer::listen(const std::string& local_path)
 
         unlink(local_path.c_str());
         try {
-            if (bind(listen_socket, (struct sockaddr*)&sa,
-                    sizeof(sa) - (sizeof(sa.sun_path) - size - 1)) == -1)
+            socklen_t socklen = static_cast<socklen_t>(sizeof(sa) - (sizeof(sa.sun_path) - size - 1));
+            if (bind(listen_socket, (struct sockaddr*)&sa, socklen) == -1)
                 throw std::runtime_error("bind() failed");
 
             if (::listen(listen_socket, 100))
@@ -236,11 +236,12 @@ FastCGIServer::process(int timeout_ms)
 
     int select_result = select(nfd + 1, &fs_read, &fs_write, NULL,
         timeout_ms < 0 ? NULL : &tv);
-    if (select_result == -1)
+    if (select_result == -1) {
         if (errno == EINTR)
             return;
         else
             throw std::runtime_error("select() failed");
+    }
 
     for (std::vector<int>::const_iterator it = listen_sockets.begin();
             it != listen_sockets.end(); ++it)
@@ -258,34 +259,32 @@ FastCGIServer::process(int timeout_ms)
             }
         }
 
-    for (std::map<int, Connection*>::iterator it = read_sockets.begin();
-            it != read_sockets.end();) {
+    for (std::map<int, Connection*>::iterator it = read_sockets.begin(); it != read_sockets.end();) {
         int read_socket = it->first;
 
         if (FD_ISSET(read_socket, &fs_read)) {
-            int read_result = read(read_socket, buffer, sizeof(buffer));
-            if (read_result == -1)
+            ssize_t read_result = read(read_socket, buffer, sizeof(buffer));
+            if (read_result < 0) {
                 if (errno == ECONNRESET)
                     goto close_socket;
                 else
                     throw std::runtime_error("read() on socket failed");
-            if (read_result == 0)
+            }
+            if (read_result == 0) {
                 it->second->close_socket = true;
-            else {
-                it->second->input_buffer.append(buffer, read_result);
+            } else {
+                it->second->input_buffer.append(buffer, static_cast<size_t>(read_result));
                 process_connection_read(*it->second);
             }
         }
 
-        if (!it->second->output_buffer.empty() &&
-                FD_ISSET(read_socket, &fs_write)) {
+        if (!it->second->output_buffer.empty() && FD_ISSET(read_socket, &fs_write)) {
             process_connection_write(*it->second);
-            int write_result = write(read_socket,
-                it->second->output_buffer.data(),
-                it->second->output_buffer.size());
+            ssize_t write_result = write(read_socket, it->second->output_buffer.data(),
+                                         it->second->output_buffer.size());
             if (write_result == -1)
                 throw std::runtime_error("write() failed");
-            it->second->output_buffer.erase(0, write_result);
+            it->second->output_buffer.erase(0, static_cast<size_t>(write_result));
         }
 
         if (it->second->close_socket && it->second->output_buffer.empty()) {
@@ -322,15 +321,14 @@ FastCGIServer::process_connection_read(Connection& connection)
             break;
         }
 
-        unsigned content_length =
-            (header.contentLengthB1 << 8) + header.contentLengthB0;
+        unsigned content_length = (static_cast<unsigned>(header.contentLengthB1) << 8) + header.contentLengthB0;
         if (connection.input_buffer.size() - n <
                 FCGI_HEADER_LEN + content_length + header.paddingLength)
             break;
         const char* content =
             connection.input_buffer.data() + n + FCGI_HEADER_LEN;
 
-        RequestID request_id = (header.requestIdB1 << 8) + header.requestIdB0;
+        RequestID request_id = (static_cast<unsigned>(header.requestIdB1) << 8) + header.requestIdB0;
 
         switch (header.type) {
         case FCGI_GET_VALUES: {
@@ -353,8 +351,8 @@ FastCGIServer::process_connection_read(Connection& connection)
                         it->first, std::string("1"));
 
             std::string::size_type len = connection.output_buffer.size() - base;
-            connection.output_buffer[base + 4] = (len >> 8) & 0xff;
-            connection.output_buffer[base + 5] = len & 0xff;
+            connection.output_buffer[base + 4] = char((len >> 8) & 0xff);
+            connection.output_buffer[base + 5] = char(len & 0xff);
             break;
         }
         case FCGI_BEGIN_REQUEST: {
@@ -366,7 +364,7 @@ FastCGIServer::process_connection_read(Connection& connection)
             if (!(body.flags & FCGI_KEEP_CONN))
                 connection.close_responsibility = true;
 
-            unsigned role = (body.roleB1 << 8) + body.roleB0;
+            unsigned role = (unsigned(body.roleB1) << 8) + body.roleB0;
             if (role != FCGI_RESPONDER) {
                 FCGI_EndRequestRecord unknown;
                 bzero(&unknown, sizeof(unknown));
@@ -426,7 +424,7 @@ FastCGIServer::process_connection_read(Connection& connection)
                 break;
 
             RequestInfo& request = *it->second;
-            if (!request.params_closed)
+            if (!request.params_closed) {
                 if (content_length != 0)
                     request.params_buffer.append(content, content_length);
                 else {
@@ -443,6 +441,7 @@ FastCGIServer::process_connection_read(Connection& connection)
                     }
                     process_write_request(connection, request_id, request);
                 }
+            }
             break;
         }
         case FCGI_STDIN: {
@@ -451,7 +450,7 @@ FastCGIServer::process_connection_read(Connection& connection)
                 break;
 
             RequestInfo& request = *it->second;
-            if (!request.in_closed)
+            if (!request.in_closed) {
                 if (content_length != 0) {
                     request.in.append(content, content_length);
                     if (request.params_closed && request.status == 0) {
@@ -465,6 +464,7 @@ FastCGIServer::process_connection_read(Connection& connection)
                         process_write_request(connection, request_id, request);
                     }
                 }
+            }
             break;
         }
         case FCGI_DATA:
@@ -512,10 +512,10 @@ FastCGIServer::process_write_request(Connection& connection, RequestID id,
         complete.header.requestIdB1 = (id >> 8) & 0xff;
         complete.header.requestIdB0 = id & 0xff;
         complete.header.contentLengthB0 = sizeof(complete.body);
-        complete.body.appStatusB3 = (request.status >> 24) & 0xff;
-        complete.body.appStatusB2 = (request.status >> 16) & 0xff;
-        complete.body.appStatusB1 = (request.status >> 8) & 0xff;
-        complete.body.appStatusB0 = request.status & 0xff;
+        complete.body.appStatusB3 = static_cast<unsigned char>((request.status >> 24) & 0xff);
+        complete.body.appStatusB2 = static_cast<unsigned char>((request.status >> 16) & 0xff);
+        complete.body.appStatusB1 = static_cast<unsigned char>((request.status >> 8) & 0xff);
+        complete.body.appStatusB0 = static_cast<unsigned char>(request.status & 0xff);
         complete.body.protocolStatus = FCGI_REQUEST_COMPLETE;
         connection.output_buffer.append(
             reinterpret_cast<const char*>(&complete), sizeof(complete));
@@ -556,8 +556,8 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            name_length = ((u[m] & 0x7f) << 24) + (u[m + 1] << 16) +
-                (u[m + 2] << 8) + u[m + 3];
+            name_length = ((unsigned(u[m]) & 0x7f) << 24) + (unsigned(u[m + 1]) << 16) +
+                (unsigned(u[m + 2]) << 8) + unsigned(u[m + 3]);
             m += 4;
         } else
             name_length = u[m++];
@@ -567,8 +567,8 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            value_length = ((u[m] & 0x7f) << 24) + (u[m + 1] << 16) +
-                (u[m + 2] << 8) + u[m + 3];
+            value_length = ((unsigned(u[m]) & 0x7f) << 24) + (unsigned(u[m + 1]) << 16) +
+                (unsigned(u[m + 2]) << 8) + unsigned(u[m + 3]);
             m += 4;
         } else
             value_length = u[m++];
@@ -594,20 +594,20 @@ FastCGIServer::write_pair(std::string& buffer,
                           const std::string& key, const std::string& value)
 {
     if (key.size() > 0x7f) {
-        buffer.push_back(0x80 + ((key.size() >> 24) & 0x7f));
-        buffer.push_back((key.size() >> 16) & 0xff);
-        buffer.push_back((key.size() >> 8) & 0xff);
-        buffer.push_back(key.size() & 0xff);
+        buffer.push_back(char(0x80 + ((key.size() >> 24) & 0x7f)));
+        buffer.push_back(char((key.size() >> 16) & 0xff));
+        buffer.push_back(char((key.size() >> 8) & 0xff));
+        buffer.push_back(char(key.size() & 0xff));
     } else
-        buffer.push_back(key.size());
+        buffer.push_back(char(key.size()));
 
     if (value.size() > 0x7f) {
-        buffer.push_back(0x80 + ((value.size() >> 24) & 0x7f));
-        buffer.push_back((value.size() >> 16) & 0xff);
-        buffer.push_back((value.size() >> 8) & 0xff);
-        buffer.push_back(value.size() & 0xff);
+        buffer.push_back(char(0x80 + ((value.size() >> 24) & 0x7f)));
+        buffer.push_back(char((value.size() >> 16) & 0xff));
+        buffer.push_back(char((value.size() >> 8) & 0xff));
+        buffer.push_back(char(value.size() & 0xff));
     } else
-        buffer.push_back(value.size());
+        buffer.push_back(char(value.size()));
 
     buffer.append(key);
     buffer.append(value);
@@ -629,8 +629,8 @@ FastCGIServer::write_data(std::string& buffer, RequestID id,
         std::string::size_type written = std::min(input.size() - n,
             (std::string::size_type)0xffffu);
 
-        header.contentLengthB1 = written >> 8;
-        header.contentLengthB0 = written & 0xff;
+        header.contentLengthB1 = (unsigned char)(written >> 8);
+        header.contentLengthB0 = (unsigned char)(written & 0xff);
         header.paddingLength = (8 - (written % 8)) % 8;
         buffer.append(
             reinterpret_cast<const char*>(&header), sizeof(header));
