@@ -168,8 +168,8 @@ struct Querier {
 
         size_t m = i == stream.size() || rand() % 3 != 0 ? 0 :
             rand() % std::min(stream.size() - i, (std::string::size_type)63);
-        char padding[m];
-        bzero(padding, m);
+        std::unique_ptr<char[]> padding( new char[m] );
+        bzero(padding.get(), m);
 
         FCGI_Header header;
         bzero(&header, sizeof(header));
@@ -181,7 +181,7 @@ struct Querier {
 
         write(reinterpret_cast<const char*>(&header), sizeof(header));
         write(stream.data() + i, n);
-        write(padding, m);
+        write(padding.get(), m);
         i += n;
     }
 
