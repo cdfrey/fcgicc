@@ -1,6 +1,7 @@
 // vim: set expandtab ts=4 sw=4 :
 /*
  * Copyright 2008, 2009 Andrey Zholos. All rights reserved.
+ * Copyright 2024 Chris Frey.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -100,7 +101,9 @@ protected:
     };
 
     typedef unsigned RequestID;
-    typedef std::map<RequestID, RequestInfo*> RequestList;
+    typedef std::unique_ptr<RequestInfo> RequestInfoPtr;
+    typedef std::map<RequestID, RequestInfoPtr> RequestList;
+
     struct Connection {
         Connection();
 
@@ -112,11 +115,12 @@ protected:
     };
 
     typedef std::map<std::string, std::string> Pairs;
+    typedef std::unique_ptr<Connection> ConnectionPtr;
 
     std::vector<int> listen_sockets;
     std::vector<std::string> listen_unlink;
 
-    std::map<int, Connection*> read_sockets;
+    std::map<int, ConnectionPtr> read_sockets;
 
     void process_connection_read(Connection&);
     static void process_write_request(Connection&, RequestID, RequestInfo&);

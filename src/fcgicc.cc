@@ -1,6 +1,7 @@
 // vim: set expandtab ts=4 sw=4 :
 /*
  * Copyright 2008, 2009 Andrey Zholos. All rights reserved.
+ * Copyright 2024 Chris Frey.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -82,22 +83,14 @@ FastCGIServer::FastCGIServer() :
 
 FastCGIServer::~FastCGIServer()
 {
-    for (std::vector<int>::iterator it = listen_sockets.begin();
-            it != listen_sockets.end(); ++it)
-        close(*it);
+    for (auto &sock : listen_sockets)
+        close(sock);
 
-    for (std::vector<std::string>::iterator it = listen_unlink.begin();
-            it != listen_unlink.end(); ++it)
-        unlink(it->c_str());
+    for (auto &name : listen_unlink)
+        unlink(name.c_str());
 
-    for (std::map<int, Connection*>::iterator it = read_sockets.begin();
-            it != read_sockets.end(); ++it) {
-        close(it->first);
-        for (RequestList::iterator req_it = it->second->requests.begin();
-                req_it != it->second->requests.end(); ++req_it)
-            delete req_it->second;
-        delete it->second;
-    }
+    for (auto &pair : read_sockets)
+        close(pair.first);
 }
 
 
@@ -220,22 +213,19 @@ FastCGIServer::process(int timeout_ms)
     FD_ZERO(&fs_read);
     FD_ZERO(&fs_write);
 
-    for (std::vector<int>::const_iterator it = listen_sockets.begin();
-            it != listen_sockets.end(); ++it) {
-        FD_SET(*it, &fs_read);
-        nfd = std::max(nfd, *it);
+    for (auto &sock : listen_sockets) {
+        FD_SET(sock, &fs_read);
+        nfd = std::max(nfd, sock);
     }
 
-    for (std::map<int, Connection*>::const_iterator it = read_sockets.begin();
-            it != read_sockets.end(); ++it) {
-        FD_SET(it->first, &fs_read);
-        if (!it->second->output_buffer.empty())
-            FD_SET(it->first, &fs_write);
-        nfd = std::max(nfd, it->first);
+    for (auto &[sock, conn_ptr] : read_sockets) {
+        FD_SET(sock, &fs_read);
+        if (!conn_ptr->output_buffer.empty())
+            FD_SET(sock, &fs_write);
+        nfd = std::max(nfd, sock);
     }
 
-    int select_result = select(nfd + 1, &fs_read, &fs_write, NULL,
-        timeout_ms < 0 ? NULL : &tv);
+    int select_result = select(nfd + 1, &fs_read, &fs_write, NULL, timeout_ms < 0 ? NULL : &tv);
     if (select_result == -1) {
         if (errno == EINTR)
             return;
@@ -243,23 +233,17 @@ FastCGIServer::process(int timeout_ms)
             throw std::runtime_error("select() failed");
     }
 
-    for (std::vector<int>::const_iterator it = listen_sockets.begin();
-            it != listen_sockets.end(); ++it)
-        if (FD_ISSET(*it, &fs_read)) {
-            int read_socket = accept(*it, NULL, NULL);
+    for (auto &sock : listen_sockets) {
+        if (FD_ISSET(sock, &fs_read)) {
+            int read_socket = accept(sock, NULL, NULL);
             if (read_socket == -1)
                 throw std::runtime_error("accept() failed");
-            Connection* connection = new Connection;
-            try {
-                read_sockets.insert(std::map<int, Connection*>::value_type(
-                    read_socket,  connection));
-            } catch (...) {
-                delete connection;
-                throw;
-            }
+            ConnectionPtr connection( new Connection );
+            read_sockets.insert({read_socket, std::move(connection)});
         }
+    }
 
-    for (std::map<int, Connection*>::iterator it = read_sockets.begin(); it != read_sockets.end();) {
+    for (auto it = read_sockets.begin(); it != read_sockets.end(); ) {
         int read_socket = it->first;
 
         if (FD_ISSET(read_socket, &fs_read)) {
@@ -292,9 +276,7 @@ FastCGIServer::process(int timeout_ms)
             int close_result = close(it->first);
             if (close_result == -1 && errno != ECONNRESET)
                 throw std::runtime_error("close() failed");
-            Connection* connection = it->second;
-            read_sockets.erase(it++);
-            delete connection;
+            it = read_sockets.erase(it);
         } else
             ++it;
     }
@@ -382,19 +364,12 @@ FastCGIServer::process_connection_read(Connection& connection)
             {
                 RequestList::iterator it = connection.requests.find(request_id);
                 if (it != connection.requests.end()) {
-                    delete it->second;
                     connection.requests.erase(it);
                 }
             }
 
-            RequestInfo* new_request = new RequestInfo;
-            try {
-                connection.requests.insert(RequestList::value_type(
-                    request_id, new_request));
-            } catch (...) {
-                delete new_request;
-                throw;
-            }
+            RequestInfoPtr new_request(new RequestInfo);
+            connection.requests.insert( {request_id, std::move(new_request)} );
             break;
         }
         case FCGI_ABORT_REQUEST: {
@@ -414,7 +389,6 @@ FastCGIServer::process_connection_read(Connection& connection)
             if (connection.close_responsibility)
                 connection.close_socket = true;
 
-            delete it->second;
             connection.requests.erase(it);
             break;
         }
@@ -530,13 +504,10 @@ FastCGIServer::process_write_request(Connection& connection, RequestID id,
 void
 FastCGIServer::process_connection_write(Connection& connection)
 {
-    for (RequestList::iterator it = connection.requests.begin();
-            it != connection.requests.end();) {
+    for (auto it = connection.requests.begin(); it != connection.requests.end(); ) {
         process_write_request(connection, it->first, *it->second);
         if (it->second->params_closed && it->second->in_closed) {
-            RequestInfo* request = it->second;
-            connection.requests.erase(it++);
-            delete request;
+            it = connection.requests.erase(it);
         } else
             ++it;
     }
@@ -580,8 +551,7 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
 
         if (n - m < value_length)
             break;
-        pairs.insert(Pairs::value_type(
-            key, std::string(data + m, value_length)));
+        pairs.insert( {key, std::string(data + m, value_length)} );
         m += value_length;
     }
 
@@ -642,3 +612,4 @@ FastCGIServer::write_data(std::string& buffer, RequestID id,
             break;
     }
 }
+
