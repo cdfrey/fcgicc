@@ -556,8 +556,8 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            name_length = ((unsigned(u[m]) & 0x7f) << 24) + (unsigned(u[m + 1]) << 16) +
-                (unsigned(u[m + 2]) << 8) + unsigned(u[m + 3]);
+            name_length = ((uint32_t(u[m]) & 0x7f) << 24) + (uint32_t(u[m + 1]) << 16) +
+                (uint32_t(u[m + 2]) << 8) + uint32_t(u[m + 3]);
             m += 4;
         } else
             name_length = u[m++];
@@ -567,8 +567,8 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            value_length = ((unsigned(u[m]) & 0x7f) << 24) + (unsigned(u[m + 1]) << 16) +
-                (unsigned(u[m + 2]) << 8) + unsigned(u[m + 3]);
+            value_length = ((uint32_t(u[m]) & 0x7f) << 24) + (uint32_t(u[m + 1]) << 16) +
+                (uint32_t(u[m + 2]) << 8) + uint32_t(u[m + 3]);
             m += 4;
         } else
             value_length = u[m++];
