@@ -57,7 +57,6 @@ public:
 class FastCGIServer {
 public:
     FastCGIServer();
-    ~FastCGIServer();
 
     // called when the parameters and standard input have been receieved
     void request_handler(int (* function)(FastCGIRequest&));
@@ -88,6 +87,55 @@ public:
     void process_forever();
 
 protected:
+    static void FileID_cleanup(int &id);
+    static void FileID_cleanup(const std::string &id);
+    static bool FileID_valid(int id);
+    static bool FileID_valid(const std::string &id);
+
+    template <class T>
+    class FileID {
+        T file_id;
+        bool valid;             // if true, cleanup should be run on file_id
+
+    public:
+        FileID()                : file_id(-1), valid(false) {}
+        FileID(T id)            : file_id(id), valid(FileID_valid(id)) {}
+        FileID(FileID &&o)      : file_id(o.file_id), valid(o.valid) { o.valid = false; }
+        FileID(const FileID &o) = delete;
+        ~FileID() {
+            if (valid)
+                FileID_cleanup(file_id);
+        }
+
+        T operator=(const FileID &o) = delete;
+        T operator=(FileID &&o) {
+            if (valid)
+                FileID_cleanup(file_id);
+            file_id = o.file_id;
+            valid = o.valid;
+            o.valid = false;
+            return file_id;
+        }
+
+        bool is_valid() const { return valid; }
+        const T& get() const { return file_id; }
+        operator T() const { return file_id; }
+        T release() {
+            valid = false;
+            return file_id;
+        }
+    };
+
+    template<class T>
+    struct FileID_less {
+        using is_transparent = void;
+
+        bool operator()(const T &lhs,         const T &rhs        ) const { return lhs       < rhs; }
+        bool operator()(const FileID<T> &lhs, const T &rhs        ) const { return lhs.get() < rhs; }
+        bool operator()(const T &lhs,         const FileID<T> &rhs) const { return lhs       < rhs.get(); }
+        bool operator()(const FileID<T> &lhs, const FileID<T> &rhs) const { return lhs.get() < rhs.get(); }
+    };
+
     struct RequestInfo : FastCGIRequest {
         RequestInfo();
 
@@ -117,10 +165,10 @@ protected:
     typedef std::map<std::string, std::string> Pairs;
     typedef std::unique_ptr<Connection> ConnectionPtr;
 
-    std::vector<int> listen_sockets;
-    std::vector<std::string> listen_unlink;
+    std::vector<FileID<int>> listen_sockets;
+    std::vector<FileID<std::string>> listen_unlink;
 
-    std::map<int, ConnectionPtr> read_sockets;
+    std::map<FileID<int>, ConnectionPtr, FileID_less<int>> read_sockets;
 
     void process_connection_read(Connection&);
     static void process_write_request(Connection&, RequestID, RequestInfo&);

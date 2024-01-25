@@ -50,6 +50,28 @@
 #include <fastcgi.h>
 
 
+void FastCGIServer::FileID_cleanup(int &id)
+{
+    ::close(id);
+}
+
+void FastCGIServer::FileID_cleanup(const std::string &id)
+{
+    ::unlink(id.c_str());
+}
+
+bool FastCGIServer::FileID_valid(int id)
+{
+    return id != -1;
+}
+
+bool FastCGIServer::FileID_valid(const std::string &id)
+{
+    return id.size() > 0;
+}
+
+
+
 FastCGIServer::RequestInfo::RequestInfo() :
     params_closed(false),
     in_closed(false),
@@ -78,19 +100,6 @@ FastCGIServer::FastCGIServer() :
     handle_data(new HandlerBase),
     handle_complete(new HandlerBase)
 {
-}
-
-
-FastCGIServer::~FastCGIServer()
-{
-    for (auto &sock : listen_sockets)
-        close(sock);
-
-    for (auto &name : listen_unlink)
-        unlink(name.c_str());
-
-    for (auto &pair : read_sockets)
-        close(pair.first);
 }
 
 
@@ -197,6 +206,8 @@ FastCGIServer::listen(const std::string& local_path)
 void
 FastCGIServer::abandon_files()
 {
+    for (auto &file : listen_unlink)
+        file.release();
     listen_unlink.clear();
 }
 
@@ -215,14 +226,14 @@ FastCGIServer::process(int timeout_ms)
 
     for (auto &sock : listen_sockets) {
         FD_SET(sock, &fs_read);
-        nfd = std::max(nfd, sock);
+        nfd = std::max(nfd, sock.get());
     }
 
     for (auto &[sock, conn_ptr] : read_sockets) {
         FD_SET(sock, &fs_read);
         if (!conn_ptr->output_buffer.empty())
             FD_SET(sock, &fs_write);
-        nfd = std::max(nfd, sock);
+        nfd = std::max(nfd, sock.get());
     }
 
     int select_result = select(nfd + 1, &fs_read, &fs_write, NULL, timeout_ms < 0 ? NULL : &tv);
@@ -230,16 +241,16 @@ FastCGIServer::process(int timeout_ms)
         if (errno == EINTR)
             return;
         else
-            throw std::runtime_error("select() failed");
+            throw std::runtime_error(std::string("select() failed: ") + strerror(errno));
     }
 
     for (auto &sock : listen_sockets) {
         if (FD_ISSET(sock, &fs_read)) {
-            int read_socket = accept(sock, NULL, NULL);
+            FileID read_socket( accept(sock, NULL, NULL) );
             if (read_socket == -1)
                 throw std::runtime_error("accept() failed");
             ConnectionPtr connection( new Connection );
-            read_sockets.insert({read_socket, std::move(connection)});
+            read_sockets.try_emplace(std::move(read_socket), std::move(connection));
         }
     }
 
