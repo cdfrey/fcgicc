@@ -130,7 +130,7 @@ FastCGIServer::set_handler(std::unique_ptr<HandlerBase> &handler, HandlerBase* n
 
 
 void
-FastCGIServer::listen(uint16_t tcp_port)
+FastCGIServer::listen(unsigned tcp_port)
 {
     int listen_socket = socket(PF_INET, SOCK_STREAM, 0);
     if (listen_socket == -1)
@@ -140,7 +140,7 @@ FastCGIServer::listen(uint16_t tcp_port)
         struct sockaddr_in sa;
         bzero(&sa, sizeof(sa));
         sa.sin_family = AF_INET;
-        sa.sin_port = htons(tcp_port);
+        sa.sin_port = htons(uint16_t(tcp_port));
         sa.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(listen_socket, (struct sockaddr*)&sa, sizeof(sa)) == -1)
             throw std::runtime_error("bind() failed");
