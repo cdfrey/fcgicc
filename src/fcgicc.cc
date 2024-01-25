@@ -98,39 +98,34 @@ FastCGIServer::~FastCGIServer()
             delete req_it->second;
         delete it->second;
     }
-
-    delete handle_request;
-    delete handle_data;
-    delete handle_complete;
 }
 
 
 void
 FastCGIServer::request_handler(int (* function)(FastCGIRequest&))
 {
-    handle_request = new StaticHandler(function);
+    handle_request.reset(new StaticHandler(function));
 }
 
 
 void
 FastCGIServer::data_handler(int (* function)(FastCGIRequest&))
 {
-    handle_data = new StaticHandler(function);
+    handle_data.reset(new StaticHandler(function));
 }
 
 
 void
 FastCGIServer::complete_handler(int (* function)(FastCGIRequest&))
 {
-    handle_complete = new StaticHandler(function);
+    handle_complete.reset(new StaticHandler(function));
 }
 
 
 void
-FastCGIServer::set_handler(HandlerBase*& handler, HandlerBase* new_handler)
+FastCGIServer::set_handler(std::unique_ptr<HandlerBase> &handler, HandlerBase* new_handler)
 {
-    delete handler;
-    handler = new_handler;
+    handler.reset(new_handler);
 }
 
 

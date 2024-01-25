@@ -39,6 +39,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <memory>
 
 
 class FastCGIRequest {
@@ -121,13 +122,12 @@ protected:
     static void process_write_request(Connection&, RequestID, RequestInfo&);
     static void process_connection_write(Connection&);
     static Pairs parse_pairs(const char*, std::string::size_type);
-    static void write_pair(std::string& buffer,
-        const std::string& key, const std::string&);
-    static void write_data(std::string& buffer, RequestID id,
-        const std::string& input, unsigned char type);
+    static void write_pair(std::string& buffer, const std::string& key, const std::string&);
+    static void write_data(std::string& buffer, RequestID id, const std::string& input, unsigned char type);
 
 
     struct HandlerBase {
+        virtual ~HandlerBase() = default;
         virtual int operator()(FastCGIRequest&);
     };
 
@@ -153,11 +153,12 @@ protected:
         int (C::* function)(FastCGIRequest&);
     };
 
-    void set_handler(HandlerBase*&, HandlerBase*);
+    void set_handler(std::unique_ptr<HandlerBase>&, HandlerBase*);
 
-    HandlerBase* handle_request;
-    HandlerBase* handle_data;
-    HandlerBase* handle_complete;
+    std::unique_ptr<HandlerBase> handle_request;
+    std::unique_ptr<HandlerBase> handle_data;
+    std::unique_ptr<HandlerBase> handle_complete;
 };
 
 #endif // !FCGICC_H
+
