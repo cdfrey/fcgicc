@@ -290,163 +290,166 @@ FastCGIServer::process_connection_read(Connection& connection)
 {
     std::string::size_type n = 0;
     while (connection.input_buffer.size() - n >= FCGI_HEADER_LEN) {
-        const FCGI_Header& header = *reinterpret_cast<const FCGI_Header*>(
-            connection.input_buffer.data() + n);
+        const FCGI_Header& header = *reinterpret_cast<const FCGI_Header*>(connection.input_buffer.data() + n);
         if (header.version != FCGI_VERSION_1) {
             connection.close_socket = true;
             break;
         }
 
         unsigned content_length = (static_cast<unsigned>(header.contentLengthB1) << 8) + header.contentLengthB0;
-        if (connection.input_buffer.size() - n <
-                FCGI_HEADER_LEN + content_length + header.paddingLength)
+        if (connection.input_buffer.size() - n < FCGI_HEADER_LEN + content_length + header.paddingLength)
             break;
-        const char* content =
-            connection.input_buffer.data() + n + FCGI_HEADER_LEN;
+        const char* content = connection.input_buffer.data() + n + FCGI_HEADER_LEN;
 
         RequestID request_id = (static_cast<unsigned>(header.requestIdB1) << 8) + header.requestIdB0;
 
-        switch (header.type) {
-        case FCGI_GET_VALUES: {
-            Pairs pairs = parse_pairs(content, content_length);
+        switch (header.type)
+        {
+        case FCGI_GET_VALUES:
+            {
+                Pairs pairs = parse_pairs(content, content_length);
 
-            std::string::size_type base = connection.output_buffer.size();
-            connection.output_buffer.push_back(FCGI_VERSION_1);
-            connection.output_buffer.push_back(FCGI_GET_VALUES_RESULT);
-            connection.output_buffer.append(FCGI_HEADER_LEN - 2, 0);
+                std::string::size_type base = connection.output_buffer.size();
+                connection.output_buffer.push_back(FCGI_VERSION_1);
+                connection.output_buffer.push_back(FCGI_GET_VALUES_RESULT);
+                connection.output_buffer.append(FCGI_HEADER_LEN - 2, 0);
 
-            for (Pairs::iterator it = pairs.begin(); it != pairs.end(); ++it)
-                if (it->first == FCGI_MAX_CONNS)
-                    write_pair(connection.output_buffer,
-                        it->first, std::string("100"));
-                else if (it->first == FCGI_MAX_REQS)
-                    write_pair(connection.output_buffer,
-                        it->first, std::string("1000"));
-                else if (it->first == FCGI_MPXS_CONNS)
-                    write_pair(connection.output_buffer,
-                        it->first, std::string("1"));
+                for (Pairs::iterator it = pairs.begin(); it != pairs.end(); ++it) {
+                    if (it->first == FCGI_MAX_CONNS)
+                        write_pair(connection.output_buffer, it->first, std::string("100"));
+                    else if (it->first == FCGI_MAX_REQS)
+                        write_pair(connection.output_buffer, it->first, std::string("1000"));
+                    else if (it->first == FCGI_MPXS_CONNS)
+                        write_pair(connection.output_buffer, it->first, std::string("1"));
+                }
 
-            std::string::size_type len = connection.output_buffer.size() - base;
-            connection.output_buffer[base + 4] = char((len >> 8) & 0xff);
-            connection.output_buffer[base + 5] = char(len & 0xff);
-            break;
-        }
-        case FCGI_BEGIN_REQUEST: {
-            if (content_length < sizeof(FCGI_BeginRequestBody))
-                break;
-            const FCGI_BeginRequestBody& body =
-                *reinterpret_cast<const FCGI_BeginRequestBody*>(content);
-
-            if (!(body.flags & FCGI_KEEP_CONN))
-                connection.close_responsibility = true;
-
-            unsigned role = (unsigned(body.roleB1) << 8) + body.roleB0;
-            if (role != FCGI_RESPONDER) {
-                FCGI_EndRequestRecord unknown;
-                bzero(&unknown, sizeof(unknown));
-                unknown.header.version = FCGI_VERSION_1;
-                unknown.header.type = FCGI_END_REQUEST;
-                unknown.header.contentLengthB0 = sizeof(unknown.body);
-                unknown.body.protocolStatus = FCGI_UNKNOWN_ROLE;
-                connection.output_buffer.append(
-                    reinterpret_cast<const char*>(&unknown), sizeof(unknown));
-                if (connection.close_responsibility)
-                    connection.close_socket = true;
+                std::string::size_type len = connection.output_buffer.size() - base;
+                connection.output_buffer[base + 4] = char((len >> 8) & 0xff);
+                connection.output_buffer[base + 5] = char(len & 0xff);
                 break;
             }
 
+        case FCGI_BEGIN_REQUEST:
+            {
+                if (content_length < sizeof(FCGI_BeginRequestBody))
+                    break;
+                const FCGI_BeginRequestBody& body = *reinterpret_cast<const FCGI_BeginRequestBody*>(content);
+
+                if (!(body.flags & FCGI_KEEP_CONN))
+                    connection.close_responsibility = true;
+
+                unsigned role = (unsigned(body.roleB1) << 8) + body.roleB0;
+                if (role != FCGI_RESPONDER) {
+                    FCGI_EndRequestRecord unknown;
+                    bzero(&unknown, sizeof(unknown));
+                    unknown.header.version = FCGI_VERSION_1;
+                    unknown.header.type = FCGI_END_REQUEST;
+                    unknown.header.contentLengthB0 = sizeof(unknown.body);
+                    unknown.body.protocolStatus = FCGI_UNKNOWN_ROLE;
+                    connection.output_buffer.append(reinterpret_cast<const char*>(&unknown), sizeof(unknown));
+                    if (connection.close_responsibility)
+                        connection.close_socket = true;
+                    break;
+                }
+
+                {
+                    RequestList::iterator it = connection.requests.find(request_id);
+                    if (it != connection.requests.end()) {
+                        connection.requests.erase(it);
+                    }
+                }
+
+                RequestInfoPtr new_request(new RequestInfo);
+                connection.requests.insert( {request_id, std::move(new_request)} );
+                break;
+            }
+
+        case FCGI_ABORT_REQUEST:
             {
                 RequestList::iterator it = connection.requests.find(request_id);
-                if (it != connection.requests.end()) {
-                    connection.requests.erase(it);
-                }
+                if (it == connection.requests.end())
+                    break;
+
+                FCGI_EndRequestRecord aborted;
+                bzero(&aborted, sizeof(aborted));
+                aborted.header.version = FCGI_VERSION_1;
+                aborted.header.type = FCGI_END_REQUEST;
+                aborted.header.contentLengthB0 = sizeof(aborted.body);
+                aborted.body.appStatusB0 = 1;
+                aborted.body.protocolStatus = FCGI_REQUEST_COMPLETE;
+                connection.output_buffer.append(reinterpret_cast<const char*>(&aborted), sizeof(aborted));
+                if (connection.close_responsibility)
+                    connection.close_socket = true;
+
+                connection.requests.erase(it);
+                break;
             }
 
-            RequestInfoPtr new_request(new RequestInfo);
-            connection.requests.insert( {request_id, std::move(new_request)} );
-            break;
-        }
-        case FCGI_ABORT_REQUEST: {
-            RequestList::iterator it = connection.requests.find(request_id);
-            if (it == connection.requests.end())
+        case FCGI_PARAMS:
+            {
+                RequestList::iterator it = connection.requests.find(request_id);
+                if (it == connection.requests.end())
+                    break;
+
+                RequestInfo& request = *it->second;
+                if (!request.params_closed) {
+                    if (content_length != 0)
+                        request.params_buffer.append(content, content_length);
+                    else {
+                        request.params = parse_pairs(request.params_buffer.data(), request.params_buffer.size());
+                        request.params_buffer.clear();
+                        request.params_closed = true;
+
+                        request.status = (*handle_request)(request);
+                        if (request.status == 0 && !request.in.empty()) {
+                            request.status = (*handle_data)(request);
+                            if (request.status == 0 && request.in_closed)
+                                request.status = (*handle_complete)(request);
+                        }
+                        process_write_request(connection, request_id, request);
+                    }
+                }
                 break;
+            }
 
-            FCGI_EndRequestRecord aborted;
-            bzero(&aborted, sizeof(aborted));
-            aborted.header.version = FCGI_VERSION_1;
-            aborted.header.type = FCGI_END_REQUEST;
-            aborted.header.contentLengthB0 = sizeof(aborted.body);
-            aborted.body.appStatusB0 = 1;
-            aborted.body.protocolStatus = FCGI_REQUEST_COMPLETE;
-            connection.output_buffer.append(
-                reinterpret_cast<const char*>(&aborted), sizeof(aborted));
-            if (connection.close_responsibility)
-                connection.close_socket = true;
+        case FCGI_STDIN:
+            {
+                RequestList::iterator it = connection.requests.find(request_id);
+                if (it == connection.requests.end())
+                    break;
 
-            connection.requests.erase(it);
-            break;
-        }
-        case FCGI_PARAMS: {
-            RequestList::iterator it = connection.requests.find(request_id);
-            if (it == connection.requests.end())
-                break;
-
-            RequestInfo& request = *it->second;
-            if (!request.params_closed) {
-                if (content_length != 0)
-                    request.params_buffer.append(content, content_length);
-                else {
-                    request.params = parse_pairs(request.params_buffer.data(),
-                        request.params_buffer.size());
-                    request.params_buffer.clear();
-                    request.params_closed = true;
-
-                    request.status = (*handle_request)(request);
-                    if (request.status == 0 && !request.in.empty()) {
-                        request.status = (*handle_data)(request);
-                        if (request.status == 0 && request.in_closed)
+                RequestInfo& request = *it->second;
+                if (!request.in_closed) {
+                    if (content_length != 0) {
+                        request.in.append(content, content_length);
+                        if (request.params_closed && request.status == 0) {
+                            request.status = (*handle_data)(request);
+                            process_write_request(connection, request_id, request);
+                        }
+                    } else {
+                        request.in_closed = true;
+                        if (request.params_closed && request.status == 0) {
                             request.status = (*handle_complete)(request);
+                            process_write_request(connection, request_id, request);
+                        }
                     }
-                    process_write_request(connection, request_id, request);
                 }
-            }
-            break;
-        }
-        case FCGI_STDIN: {
-            RequestList::iterator it = connection.requests.find(request_id);
-            if (it == connection.requests.end())
                 break;
-
-            RequestInfo& request = *it->second;
-            if (!request.in_closed) {
-                if (content_length != 0) {
-                    request.in.append(content, content_length);
-                    if (request.params_closed && request.status == 0) {
-                        request.status = (*handle_data)(request);
-                        process_write_request(connection, request_id, request);
-                    }
-                } else {
-                    request.in_closed = true;
-                    if (request.params_closed && request.status == 0) {
-                        request.status = (*handle_complete)(request);
-                        process_write_request(connection, request_id, request);
-                    }
-                }
             }
-            break;
-        }
+
         case FCGI_DATA:
             break;
-        default: {
-            FCGI_UnknownTypeRecord unknown;
-            bzero(&unknown, sizeof(unknown));
-            unknown.header.version = FCGI_VERSION_1;
-            unknown.header.type = FCGI_UNKNOWN_TYPE;
-            unknown.header.contentLengthB0 = sizeof(unknown.body);
-            unknown.body.type = header.type;
-            connection.output_buffer.append(
-                reinterpret_cast<const char*>(&unknown), sizeof(unknown));
-        }
+
+        default:
+            {
+                FCGI_UnknownTypeRecord unknown;
+                bzero(&unknown, sizeof(unknown));
+                unknown.header.version = FCGI_VERSION_1;
+                unknown.header.type = FCGI_UNKNOWN_TYPE;
+                unknown.header.contentLengthB0 = sizeof(unknown.body);
+                unknown.body.type = header.type;
+                connection.output_buffer.append(reinterpret_cast<const char*>(&unknown), sizeof(unknown));
+            }
         }
 
         n += FCGI_HEADER_LEN + content_length + header.paddingLength;
@@ -457,8 +460,7 @@ FastCGIServer::process_connection_read(Connection& connection)
 
 
 void
-FastCGIServer::process_write_request(Connection& connection, RequestID id,
-                                     RequestInfo& request)
+FastCGIServer::process_write_request(Connection& connection, RequestID id, RequestInfo& request)
 {
     if (!request.out.empty()) {
         write_data(connection.output_buffer, id, request.out, FCGI_STDOUT);
@@ -485,8 +487,7 @@ FastCGIServer::process_write_request(Connection& connection, RequestID id,
         complete.body.appStatusB1 = static_cast<unsigned char>((request.status >> 8) & 0xff);
         complete.body.appStatusB0 = static_cast<unsigned char>(request.status & 0xff);
         complete.body.protocolStatus = FCGI_REQUEST_COMPLETE;
-        connection.output_buffer.append(
-            reinterpret_cast<const char*>(&complete), sizeof(complete));
+        connection.output_buffer.append(reinterpret_cast<const char*>(&complete), sizeof(complete));
         if (connection.close_responsibility)
             connection.close_socket = true;
 
@@ -521,8 +522,10 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            name_length = ((uint32_t(u[m]) & 0x7f) << 24) + (uint32_t(u[m + 1]) << 16) +
-                (uint32_t(u[m + 2]) << 8) + uint32_t(u[m + 3]);
+            name_length =   ((uint32_t(u[m]) & 0x7f) << 24) +
+                            (uint32_t(u[m + 1]) << 16) +
+                            (uint32_t(u[m + 2]) << 8) +
+                            uint32_t(u[m + 3]);
             m += 4;
         } else
             name_length = u[m++];
@@ -532,8 +535,10 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
         if (u[m] >> 7) {
             if (n - m < 4)
                 break;
-            value_length = ((uint32_t(u[m]) & 0x7f) << 24) + (uint32_t(u[m + 1]) << 16) +
-                (uint32_t(u[m + 2]) << 8) + uint32_t(u[m + 3]);
+            value_length =  ((uint32_t(u[m]) & 0x7f) << 24) +
+                            (uint32_t(u[m + 1]) << 16) +
+                            (uint32_t(u[m + 2]) << 8) +
+                            uint32_t(u[m + 3]);
             m += 4;
         } else
             value_length = u[m++];
@@ -554,8 +559,7 @@ FastCGIServer::parse_pairs(const char* data, std::string::size_type n)
 
 
 void
-FastCGIServer::write_pair(std::string& buffer,
-                          const std::string& key, const std::string& value)
+FastCGIServer::write_pair(std::string& buffer, const std::string& key, const std::string& value)
 {
     if (key.size() > 0x7f) {
         buffer.push_back(char(0x80 + ((key.size() >> 24) & 0x7f)));
@@ -579,8 +583,7 @@ FastCGIServer::write_pair(std::string& buffer,
 
 
 void
-FastCGIServer::write_data(std::string& buffer, RequestID id,
-                          const std::string& input, unsigned char type)
+FastCGIServer::write_data(std::string& buffer, RequestID id, const std::string& input, unsigned char type)
 {
     FCGI_Header header;
     bzero(&header, sizeof(header));
@@ -590,14 +593,12 @@ FastCGIServer::write_data(std::string& buffer, RequestID id,
     header.requestIdB0 = id & 0xff;
 
     for (std::string::size_type n = 0;;) {
-        std::string::size_type written = std::min(input.size() - n,
-            (std::string::size_type)0xffffu);
+        std::string::size_type written = std::min(input.size() - n, (std::string::size_type)0xffffu);
 
         header.contentLengthB1 = (unsigned char)(written >> 8);
         header.contentLengthB0 = (unsigned char)(written & 0xff);
         header.paddingLength = (8 - (written % 8)) % 8;
-        buffer.append(
-            reinterpret_cast<const char*>(&header), sizeof(header));
+        buffer.append(reinterpret_cast<const char*>(&header), sizeof(header));
         buffer.append(input.data() + n, written);
         buffer.append(header.paddingLength, 0);
 
