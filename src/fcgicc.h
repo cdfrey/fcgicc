@@ -102,7 +102,7 @@ protected:
     template <class T>
     class FileID {
         T file_id;
-        bool valid;             // if true, cleanup should be run on file_id
+        mutable bool valid;             // if true, cleanup should be run on file_id
 
     public:
         FileID()                : file_id(-1), valid(false) {}
@@ -127,7 +127,10 @@ protected:
         bool is_valid() const { return valid; }
         const T& get() const { return file_id; }
         operator T() const { return file_id; }
-        T release() {
+
+        // const to allow release() access even inside std::map
+        // not ideal, but...
+        T release() const {
             valid = false;
             return file_id;
         }

@@ -267,7 +267,7 @@ FastCGIServer::process(int timeout_ms)
 
         if (it->second->close_socket && it->second->output_buffer.empty()) {
         close_socket:
-            int close_result = close(it->first);
+            int close_result = close(it->first.release());
             if (close_result == -1 && errno != ECONNRESET)
                 throw errno_error("close() failed");
             it = read_sockets.erase(it);
