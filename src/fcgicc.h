@@ -43,6 +43,7 @@
 #include <memory>
 #include <system_error>
 
+typedef unsigned int RequestID;
 
 class errno_error : public std::system_error {
 public:
@@ -54,6 +55,7 @@ class FastCGIRequest {
 public:
     typedef std::map<std::string, std::string> Params;
 
+    RequestID id;
     Params params;
     std::string in;
     std::string out;
@@ -147,7 +149,7 @@ protected:
     };
 
     struct RequestInfo : FastCGIRequest {
-        RequestInfo();
+        explicit RequestInfo(RequestID request_id);
 
         std::string params_buffer;
         bool params_closed;
@@ -158,7 +160,6 @@ protected:
         friend class FastCGIServer;
     };
 
-    typedef unsigned RequestID;
     typedef std::unique_ptr<RequestInfo> RequestInfoPtr;
     typedef std::map<RequestID, RequestInfoPtr> RequestList;
 

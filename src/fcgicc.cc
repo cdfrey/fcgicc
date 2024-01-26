@@ -72,11 +72,13 @@ bool FastCGIServer::FileID_valid(const std::string &id)
 
 
 
-FastCGIServer::RequestInfo::RequestInfo() :
+FastCGIServer::RequestInfo::RequestInfo(RequestID rid) :
     params_closed(false),
     in_closed(false),
     output_closed(false)
 {
+    // fill in the base class with data we only know now
+    id = rid;
 }
 
 
@@ -359,7 +361,7 @@ FastCGIServer::process_connection_read(Connection& connection)
                     }
                 }
 
-                RequestInfoPtr new_request(new RequestInfo);
+                RequestInfoPtr new_request(new RequestInfo(request_id));
                 connection.requests.insert( {request_id, std::move(new_request)} );
                 break;
             }
@@ -470,8 +472,7 @@ FastCGIServer::process_write_request(Connection& connection, RequestID id, Reque
         write_data(connection.output_buffer, id, request.err, FCGI_STDERR);
         request.err.clear();
     }
-    if ((request.in_closed || request.status != 0) &&
-            !request.output_closed) {
+    if ((request.in_closed || request.status != 0) && !request.output_closed) {
         write_data(connection.output_buffer, id, request.out, FCGI_STDOUT);
         write_data(connection.output_buffer, id, request.err, FCGI_STDERR);
 
