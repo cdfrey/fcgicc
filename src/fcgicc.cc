@@ -136,7 +136,7 @@ FastCGIServer::listen(unsigned tcp_port)
 {
     int listen_socket = socket(PF_INET, SOCK_STREAM, 0);
     if (listen_socket == -1)
-        throw std::runtime_error("socket() failed");
+        throw errno_error("socket() failed");
 
     try {
         struct sockaddr_in sa;
@@ -145,10 +145,10 @@ FastCGIServer::listen(unsigned tcp_port)
         sa.sin_port = htons(uint16_t(tcp_port));
         sa.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(listen_socket, (struct sockaddr*)&sa, sizeof(sa)) == -1)
-            throw std::runtime_error("bind() failed");
+            throw errno_error("bind() failed");
 
         if (::listen(listen_socket, 100))
-            throw std::runtime_error("listen() failed");
+            throw errno_error("listen() failed");
 
         listen_sockets.push_back(listen_socket);
 
@@ -164,7 +164,7 @@ FastCGIServer::listen(const std::string& local_path)
 {
     int listen_socket = socket(PF_UNIX, SOCK_STREAM, 0);
     if (listen_socket == -1)
-        throw std::runtime_error("socket() failed");
+        throw errno_error("socket() failed");
 
     try {
         struct sockaddr_un sa;
@@ -183,10 +183,10 @@ FastCGIServer::listen(const std::string& local_path)
         try {
             socklen_t socklen = static_cast<socklen_t>(sizeof(sa) - (sizeof(sa.sun_path) - size - 1));
             if (bind(listen_socket, (struct sockaddr*)&sa, socklen) == -1)
-                throw std::runtime_error("bind() failed");
+                throw errno_error("bind() failed");
 
             if (::listen(listen_socket, 100))
-                throw std::runtime_error("listen() failed");
+                throw errno_error("listen() failed");
 
             listen_sockets.push_back(listen_socket);
             listen_unlink.push_back(local_path);
@@ -241,14 +241,14 @@ FastCGIServer::process(int timeout_ms)
         if (errno == EINTR)
             return;
         else
-            throw std::runtime_error(std::string("select() failed: ") + strerror(errno));
+            throw errno_error("select() failed");
     }
 
     for (auto &sock : listen_sockets) {
         if (FD_ISSET(sock, &fs_read)) {
             FileID read_socket( accept(sock, NULL, NULL) );
             if (read_socket == -1)
-                throw std::runtime_error("accept() failed");
+                throw errno_error("accept() failed");
             ConnectionPtr connection( new Connection );
             read_sockets.try_emplace(std::move(read_socket), std::move(connection));
         }
@@ -263,7 +263,7 @@ FastCGIServer::process(int timeout_ms)
                 if (errno == ECONNRESET)
                     goto close_socket;
                 else
-                    throw std::runtime_error("read() on socket failed");
+                    throw errno_error("read() on socket failed");
             }
             if (read_result == 0) {
                 it->second->close_socket = true;
@@ -278,7 +278,7 @@ FastCGIServer::process(int timeout_ms)
             ssize_t write_result = write(read_socket, it->second->output_buffer.data(),
                                          it->second->output_buffer.size());
             if (write_result == -1)
-                throw std::runtime_error("write() failed");
+                throw errno_error("write() failed");
             it->second->output_buffer.erase(0, static_cast<size_t>(write_result));
         }
 
@@ -286,7 +286,7 @@ FastCGIServer::process(int timeout_ms)
         close_socket:
             int close_result = close(it->first);
             if (close_result == -1 && errno != ECONNRESET)
-                throw std::runtime_error("close() failed");
+                throw errno_error("close() failed");
             it = read_sockets.erase(it);
         } else
             ++it;

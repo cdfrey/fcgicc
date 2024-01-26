@@ -41,7 +41,14 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <system_error>
 
+
+class errno_error : public std::system_error {
+public:
+    errno_error(const std::string &msg) :
+        std::system_error(errno, std::generic_category(), msg) {}
+};
 
 class FastCGIRequest {
 public:
