@@ -134,72 +134,55 @@ FastCGIServer::set_handler(std::unique_ptr<HandlerBase> &handler, HandlerBase* n
 void
 FastCGIServer::listen(unsigned tcp_port)
 {
-    int listen_socket = socket(PF_INET, SOCK_STREAM, 0);
+    FileID<int> listen_socket = socket(PF_INET, SOCK_STREAM, 0);
     if (listen_socket == -1)
         throw errno_error("socket() failed");
 
-    try {
-        struct sockaddr_in sa;
-        bzero(&sa, sizeof(sa));
-        sa.sin_family = AF_INET;
-        sa.sin_port = htons(uint16_t(tcp_port));
-        sa.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(listen_socket, (struct sockaddr*)&sa, sizeof(sa)) == -1)
-            throw errno_error("bind() failed");
+    struct sockaddr_in sa;
+    bzero(&sa, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(uint16_t(tcp_port));
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(listen_socket, (struct sockaddr*)&sa, sizeof(sa)) == -1)
+        throw errno_error("bind() failed");
 
-        if (::listen(listen_socket, 100))
-            throw errno_error("listen() failed");
+    if (::listen(listen_socket, 100))
+        throw errno_error("listen() failed");
 
-        listen_sockets.push_back(listen_socket);
-
-    } catch (...) {
-        close(listen_socket);
-        throw;
-    }
+    listen_sockets.push_back(std::move(listen_socket));
 }
 
 
 void
 FastCGIServer::listen(const std::string& local_path)
 {
-    int listen_socket = socket(PF_UNIX, SOCK_STREAM, 0);
+    FileID<int> listen_socket = socket(PF_UNIX, SOCK_STREAM, 0);
     if (listen_socket == -1)
         throw errno_error("socket() failed");
 
-    try {
-        struct sockaddr_un sa;
-        bzero(&sa, sizeof(sa));
-        sa.sun_family = AF_LOCAL;
+    struct sockaddr_un sa;
+    bzero(&sa, sizeof(sa));
+    sa.sun_family = AF_LOCAL;
 
-        std::string::size_type size = local_path.size();
-        if (size >= sizeof(sa.sun_path))
-            throw std::runtime_error("path too long");
-        if (local_path.find_first_of('\0') != std::string::npos)
-            throw std::runtime_error("null character in path");
+    std::string::size_type size = local_path.size();
+    if (size >= sizeof(sa.sun_path))
+        throw std::runtime_error("path too long");
+    if (local_path.find_first_of('\0') != std::string::npos)
+        throw std::runtime_error("null character in path");
 
-        std::memcpy(sa.sun_path, local_path.data(), size);
+    std::memcpy(sa.sun_path, local_path.data(), size);
 
-        unlink(local_path.c_str());
-        try {
-            socklen_t socklen = static_cast<socklen_t>(sizeof(sa) - (sizeof(sa.sun_path) - size - 1));
-            if (bind(listen_socket, (struct sockaddr*)&sa, socklen) == -1)
-                throw errno_error("bind() failed");
+    unlink(local_path.c_str());
+    listen_unlink.push_back(local_path);
 
-            if (::listen(listen_socket, 100))
-                throw errno_error("listen() failed");
+    socklen_t socklen = static_cast<socklen_t>(sizeof(sa) - (sizeof(sa.sun_path) - size - 1));
+    if (bind(listen_socket, (struct sockaddr*)&sa, socklen) == -1)
+        throw errno_error("bind() failed");
 
-            listen_sockets.push_back(listen_socket);
-            listen_unlink.push_back(local_path);
+    if (::listen(listen_socket, 100))
+        throw errno_error("listen() failed");
 
-        } catch (...) {
-            unlink(local_path.c_str());
-            throw;
-        }
-
-    } catch (...) {
-        close(listen_socket);
-        throw;
-    }
+    listen_sockets.push_back(std::move(listen_socket));
 }
 
 
@@ -246,7 +229,7 @@ FastCGIServer::process(int timeout_ms)
 
     for (auto &sock : listen_sockets) {
         if (FD_ISSET(sock, &fs_read)) {
-            FileID read_socket( accept(sock, NULL, NULL) );
+            FileID read_socket = accept(sock, NULL, NULL);
             if (read_socket == -1)
                 throw errno_error("accept() failed");
             ConnectionPtr connection( new Connection );
