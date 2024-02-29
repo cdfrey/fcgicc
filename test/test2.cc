@@ -72,7 +72,7 @@ static const int requests = 1000;
 static const std::string param_rot13("ROT13");
 
 
-struct Rot13 : public std::unary_function<char, char> {
+struct Rot13 {
     char operator() (char c) const {
         if( (c >= 'a' && c <= 'm') || (c >= 'A' && c <= 'M') )
             return char(c + 13);

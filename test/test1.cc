@@ -76,7 +76,7 @@ int handle_data(FastCGIRequest& request) {
 
     std::transform(request.in.begin(), request.in.end(),
         std::back_inserter(request.err),
-        std::bind1st(std::plus<char>(), 1));
+        [](char c) { return c + 1; });
     request.in.clear();  // don't process it again
     return 0;  // still OK
 }
