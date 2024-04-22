@@ -1,4 +1,5 @@
-CMAKE_MINIMUM_REQUIRED( VERSION 2.6 )
+# 3.14 is the first version where cppcheck potentially behaves correctly
+CMAKE_MINIMUM_REQUIRED( VERSION 3.14 )
 
 SET( CMAKE_USER_MAKE_RULES_OVERRIDE maintainer/defaults.cmake )
 
@@ -11,6 +12,17 @@ IF( NOT FCGI_INCLUDE_DIR )
     FIND_PATH( FCGI_INCLUDE_DIR fastcgi.h ${PROJECT_SOURCE_DIR}/fastcgi_devkit )
 ENDIF()
 INCLUDE_DIRECTORIES( ${FCGI_INCLUDE_DIR} )
+
+FIND_PROGRAM( CMAKE_CXX_CPPCHECK NAMES cppcheck )
+if (CMAKE_CXX_CPPCHECK)
+	list(
+		APPEND CMAKE_CXX_CPPCHECK
+			"--error-exitcode=1"
+			"--enable=warning,style,performance,portability,information,missingInclude"
+			#"--inline-suppr"
+			#"--suppressions-list=${CMAKE_SOURCE_DIR}/CppCheckSuppressions.txt"
+	)
+endif()
 
 ADD_SUBDIRECTORY( src )
 ADD_SUBDIRECTORY( test )
@@ -33,3 +45,4 @@ ADD_CUSTOM_TARGET( dist ln -sf ${PROJECT_SOURCE_DIR} ${DIST_FILE} &&
         ${DIST_FILE}/test/test2.cc
         ${DIST_FILE}/test/lighttpd.conf
         ${DIST_FILE}/test/CMakeLists.txt )
+
