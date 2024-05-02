@@ -81,6 +81,30 @@ The application processes requests using event handlers like this:
 
     ...
 
+    // For each of the 3 types of handlers, the pointer value of the request
+    // object argument is the only unique ID given for this request.
+    // You may use it anywhere you need to reference the request by some kind
+    // of ID.
+    //
+    // Behind the scenes, it is possible that multiple connections and
+    // FCGI multiplexed request_id's are at work.  These are boilded down
+    // to the single request object given you here.
+    //
+    // It is possible for interleaved request messages to come from the
+    // webserver, causing old requests to expire early.  It is _theoretically_
+    // possible the same memory address could be freed and then allocated again
+    // for a new incoming request.  The way you detect this is that if
+    // a handle_request() arrives with the same pointer value before the
+    // corresponding handle_complete() was called for it, the old request's
+    // handle_complete() will never arrive, and you should cleanup anything
+    // to do with the old request before handling the new one.
+    //
+    // Also, do not rely on the lifetime of the request object
+    // beyond the scope of the handler call.  If you need to store
+    // asynchronous data pertaining to a particular request in between
+    // calls, cache it yourself, and write it to the request inside
+    // the next handler call.
+
     int handle_request(FastCGIRequest& request) {
         // This is always the first event to occur.  It occurs when the
         // server receives all parameters.  There may be more data coming on the

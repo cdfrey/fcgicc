@@ -71,6 +71,9 @@ public:
         // The event handler can also be a class member function.  This
         // event occurs when the parameters and standard input streams are
         // both closed, and thus the request is complete.
+        //
+        // Use the Status: header field here to specify the HTTP response code
+        // if something other than 200 OK.
 
         request.out.append("Content-Type: text/plain\r\n\r\n");
         request.out.append("You requested: ");
