@@ -75,6 +75,7 @@ bool FastCGIServer::FileID_valid(const std::string &id)
 FastCGIServer::RequestInfo::RequestInfo(RequestID rid) :
     params_closed(false),
     in_closed(false),
+    status(0),
     output_closed(false)
 {
     // fill in the base class with data we only know now
