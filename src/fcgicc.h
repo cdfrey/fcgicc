@@ -47,7 +47,7 @@ typedef unsigned int RequestID;
 
 class errno_error : public std::system_error {
 public:
-    errno_error(const std::string &msg) :
+    explicit errno_error(const std::string &msg) :
         std::system_error(errno, std::generic_category(), msg) {}
 };
 
@@ -108,6 +108,7 @@ protected:
 
     public:
         FileID()                : file_id(-1), valid(false) {}
+        // cppcheck-suppress noExplicitConstructor
         FileID(T id)            : file_id(id), valid(FileID_valid(id)) {}
         FileID(FileID &&o)      : file_id(o.file_id), valid(o.valid) { o.valid = false; }
         FileID(const FileID &o) = delete;
@@ -195,9 +196,9 @@ protected:
     };
 
     struct StaticHandler : public HandlerBase {
-        StaticHandler(int (* p_function)(FastCGIRequest&)) :
+        explicit StaticHandler(int (* p_function)(FastCGIRequest&)) :
             function(p_function) {}
-        int operator()(FastCGIRequest& request) {
+        int operator()(FastCGIRequest& request) override {
             return function(request);
         }
 
@@ -206,9 +207,9 @@ protected:
 
     template<class C>
     struct Handler : public HandlerBase {
-        Handler(C& p_object, int (C::* p_function)(FastCGIRequest&)) :
+        explicit Handler(C& p_object, int (C::* p_function)(FastCGIRequest&)) :
             object(p_object), function(p_function) {}
-        int operator()(FastCGIRequest& request) {
+        int operator()(FastCGIRequest& request) override {
             return (object.*function)(request);
         }
 
