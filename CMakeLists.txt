@@ -19,7 +19,8 @@ if (CMAKE_CXX_CPPCHECK)
 		APPEND CMAKE_CXX_CPPCHECK
 			"--error-exitcode=1"
 			"--enable=warning,style,performance,portability,information,missingInclude"
-			#"--inline-suppr"
+			"--inline-suppr"
+			"--template='[{file}:{line}]: ({severity}:{id}): {message}'"
 			#"--suppressions-list=${CMAKE_SOURCE_DIR}/CppCheckSuppressions.txt"
 	)
 endif()
