@@ -38,22 +38,6 @@
 #include <functional>
 
 
-// For each of the 3 types of handlers, make sure to check the
-// request.id field, since it is possible for interleaved request
-// messages to come from the webserver at once.  Each request.id
-// marks a separate request.  It is theoretically possible that
-// handle_request() for a new request.id arrives before the
-// corresponnding handle_complete() for the old request is called.
-// In such a case, the old complete() will never arrive, and you
-// should cleanup anything to do with the old request.id before
-// handling the new one.
-//
-// Also, do not rely on the lifetime of the request object
-// beyond the scope of the handler call.  If you need to store
-// asynchronous data pertaining a particular request.id in between
-// calls, cache it yourself, and write it to the request inside
-// the next handler call.
-
 int handle_request(FastCGIRequest& request) {
     // This is always the first event to occur.  It occurs when the
     // server receives all parameters.  There may be more data coming on the
@@ -87,9 +71,6 @@ public:
         // The event handler can also be a class member function.  This
         // event occurs when the parameters and standard input streams are
         // both closed, and thus the request is complete.
-        //
-        // Use the Status: header field here to specify the HTTP response code
-        // if something other than 200 OK.
 
         request.out.append("Content-Type: text/plain\r\n\r\n");
         request.out.append("You requested: ");
